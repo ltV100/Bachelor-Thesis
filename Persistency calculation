@@ -1,0 +1,124 @@
+results12 = readtable('Final_Asymmetry_Results_12_Months_V2.csv', 'ReadRowNames', true);
+results60 = readtable('Final_Asymmetry_Results_60_Months_V2.csv', 'ReadRowNames', true);
+
+numQuintiles = 5;
+
+fprintf('Calculating transition matrix for 12-month window...\n');
+transitionMatrix12 = calculate_transition_matrix(results12, numQuintiles);
+
+fprintf('Calculating transition matrix for 60-month window...\n');
+transitionMatrix60 = calculate_transition_matrix(results60, numQuintiles);
+
+rowNames = arrayfun(@(x) sprintf('Asym%d_t', x), 1:numQuintiles, 'UniformOutput', false);
+colNames = arrayfun(@(x) sprintf('Asym%d_t+1', x), 1:numQuintiles, 'UniformOutput', false);
+
+transitionMatrix12Table = array2table(transitionMatrix12, 'RowNames', rowNames, 'VariableNames', colNames);
+transitionMatrix60Table = array2table(transitionMatrix60, 'RowNames', rowNames, 'VariableNames', colNames);
+
+writetable(transitionMatrix12Table, 'TransitionMatrix12Months_test.csv', 'WriteRowNames', true);
+writetable(transitionMatrix60Table, 'TransitionMatrix60Months_test.csv', 'WriteRowNames', true);
+
+disp('Transition Matrix for 12-Month Window:');
+disp(transitionMatrix12Table);
+
+disp('Transition Matrix for 60-Month Window:');
+disp(transitionMatrix60Table);
+
+fprintf('Performing statistical test on 12-month transition matrix...\n');
+[pValue12, diagMean12, offDiagMean12] = perform_statistical_test(transitionMatrix12);
+
+fprintf('Performing statistical test on 60-month transition matrix...\n');
+[pValue60, diagMean60, offDiagMean60] = perform_statistical_test(transitionMatrix60);
+
+fprintf('12-Month Transition Matrix:\n');
+fprintf('Mean of diagonal values: %f\n', diagMean12);
+fprintf('Mean of off-diagonal values: %f\n', offDiagMean12);
+fprintf('p-value: %f\n', pValue12);
+
+fprintf('60-Month Transition Matrix:\n');
+fprintf('Mean of diagonal values: %f\n', diagMean60);
+fprintf('Mean of off-diagonal values: %f\n', offDiagMean60);
+fprintf('p-value: %f\n', pValue60);
+
+function transitionMatrix = calculate_transition_matrix(resultsTable, numQuintiles)
+    dates = resultsTable.Properties.RowNames;
+    numMonths = length(dates);
+    numStocks = size(resultsTable, 2);
+    
+    transitionMatrix = zeros(numQuintiles, numQuintiles);
+    
+    for t = 1:numMonths-1
+        asym_t = resultsTable{t, :};
+        asym_t1 = resultsTable{t+1, :};
+        
+        validIdx = ~isnan(asym_t) & ~isnan(asym_t1);
+        asym_t = asym_t(validIdx);
+        asym_t1 = asym_t1(validIdx);
+        
+        [~, ~, quintiles_t] = quantile_rank(asym_t, numQuintiles);
+        [~, ~, quintiles_t1] = quantile_rank(asym_t1, numQuintiles);
+        
+        for p = 1:numQuintiles
+            for q = 1:numQuintiles
+                transitionMatrix(p, q) = transitionMatrix(p, q) + sum(quintiles_t == p & quintiles_t1 == q);
+            end
+        end
+        
+        fprintf('Processed month %d of %d\n', t, numMonths-1);
+    end
+    
+    rowSums = sum(transitionMatrix, 2);
+    for i = 1:numQuintiles
+        if rowSums(i) == 0
+            transitionMatrix(i, :) = NaN;
+        else
+            transitionMatrix(i, :) = transitionMatrix(i, :) / rowSums(i);
+        end
+    end
+    
+    fprintf('Row sums after calculating transition matrix:\n');
+    disp(rowSums);
+    fprintf('Transition matrix before normalization:\n');
+    disp(transitionMatrix);
+    
+    rowSumsAfterNormalization = sum(transitionMatrix, 2);
+    fprintf('Row sums after normalization (should be 1.0 for each row):\n');
+    disp(rowSumsAfterNormalization);
+    
+    columnSums = sum(transitionMatrix, 1);
+    fprintf('Column sums (should sum to ~1.0 for each column):\n');
+    disp(columnSums);
+    
+    for j = 1:numQuintiles
+        if columnSums(j) == 0
+            transitionMatrix(:, j) = NaN; % Assign NaN if the column sum is zero
+        else
+            transitionMatrix(:, j) = transitionMatrix(:, j) / columnSums(j);
+        end
+    end
+    
+    finalColumnSums = sum(transitionMatrix, 1);
+    fprintf('Final column sums after additional normalization (should be ~1.0 for each column):\n');
+    disp(finalColumnSums);
+    
+    transitionMatrix = transitionMatrix;
+end
+
+function [q, qEdges, quintiles] = quantile_rank(data, numQuintiles)
+    % Remove NaN values before calculating quantiles
+    data = data(~isnan(data));
+    
+    qEdges = quantile(data, linspace(0, 1, numQuintiles+1));
+    [~, q] = histc(data, qEdges);
+    quintiles = q;
+end
+
+function [pValue, diagMean, offDiagMean] = perform_statistical_test(transitionMatrix)
+    diagValues = diag(transitionMatrix);
+    offDiagValues = transitionMatrix(~eye(size(transitionMatrix)));
+    
+    diagMean = mean(diagValues);
+    offDiagMean = mean(offDiagValues);
+    
+    [~, pValue] = ttest2(diagValues, offDiagValues);
+end
