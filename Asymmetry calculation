@@ -1,0 +1,184 @@
+currentPath = getenv('PATH');
+rscriptPath = 'C:\Program Files\R\R-4.4.0\bin';
+if isempty(strfind(currentPath, rscriptPath))
+    setenv('PATH', [currentPath ';' rscriptPath]);
+end
+
+[status, cmdout] = system('Rscript --version');
+if status == 0
+    fprintf('Rscript is found and working:\n%s\n', cmdout);
+else
+    error('Rscript is not found. Please check the PATH.');
+end
+
+
+dates = dailyReturnsTable.Date;
+returns = dailyReturnsTable{:, 2:end}; 
+
+
+dates = datetime(dates, 'InputFormat', 'yyyy-MM-dd');
+
+
+numStocks = size(returns, 2);
+stockTickers = dailyReturnsTable.Properties.VariableNames(2:end); 
+
+
+k = @(z) 1 / (sqrt(2*pi)) * exp((-z.^2) / 2);
+
+
+f_hat = @(r, R, n, h) (1 / (n * h)) * sum(arrayfun(@(x) k((x - r) / h), R));
+
+
+startDate = min(dates);
+endDate = max(dates);
+dateRangeIdx = dates >= startDate & dates <= endDate;
+limitedDates = dates(dateRangeIdx);
+limitedReturns = returns(dateRangeIdx, :);
+
+
+endOfMonthDates = unique(dateshift(limitedDates, 'end', 'month'));
+lastTradingDayIdx = arrayfun(@(x) find(limitedDates <= x, 1, 'last'), endOfMonthDates);
+
+
+numMonths = length(endOfMonthDates);
+fullResults12 = array2table(nan(numMonths, numStocks), 'VariableNames', stockTickers);
+fullResults60 = array2table(nan(numMonths, numStocks), 'VariableNames', stockTickers);
+
+
+for i = 1:numStocks
+    fprintf('Processing stock %d of %d\n', i, numStocks);
+    currentReturns = limitedReturns(:, i);
+    
+    for t = 1:numMonths
+        endOfMonthDate = endOfMonthDates(t);
+        lastDayIdx = lastTradingDayIdx(t);
+
+        % Ensure lastDayIdx is valid
+        if isempty(lastDayIdx) || lastDayIdx == 0
+            fprintf('Skipping month %d for stock %d: Invalid lastDayIdx. endOfMonthDate: %s, lastDayIdx: %d\n', t, i, endOfMonthDate, lastDayIdx);
+            continue;
+        end
+
+        
+        fprintf('Processing month %d for stock %d: endOfMonthDate: %s, lastDayIdx: %d\n', t, i, endOfMonthDate, lastDayIdx);
+
+        startDate12 = endOfMonthDate - calmonths(12);
+        startDate60 = endOfMonthDate - calmonths(60);
+        
+        idx12Start = find(limitedDates >= startDate12, 1, 'first');
+        idx60Start = find(limitedDates >= startDate60, 1, 'first');
+
+        
+        fprintf('startDate12: %s, idx12Start: %d, startDate60: %s, idx60Start: %d\n', startDate12, idx12Start, startDate60, idx60Start);
+
+        
+        if isempty(idx12Start)
+            fprintf('Month %d for stock %d: idx12Start is empty. StartDate12: %s, EndOfMonthDate: %s\n', t, i, startDate12, endOfMonthDate);
+        elseif idx12Start > lastDayIdx
+            fprintf('Month %d for stock %d: idx12Start > lastDayIdx. idx12Start: %d, lastDayIdx: %d\n', t, i, idx12Start, lastDayIdx);
+        end
+
+        if isempty(idx60Start)
+            fprintf('Month %d for stock %d: idx60Start is empty. StartDate60: %s, EndOfMonthDate: %s\n', t, i, startDate60, endOfMonthDate);
+        elseif idx60Start > lastDayIdx
+            fprintf('Month %d for stock %d: idx60Start > lastDayIdx. idx60Start: %d, lastDayIdx: %d\n', t, i, idx60Start, lastDayIdx);
+        end
+        
+       
+        if isempty(idx12Start) || idx12Start > lastDayIdx
+            fprintf('Skipping month %d for stock %d: Not enough data for 12-month window.\n', t, i);
+            continue;
+        end
+        if isempty(idx60Start) || idx60Start > lastDayIdx
+            fprintf('Skipping month %d for stock %d: Not enough data for 60-month window.\n', t, i);
+            continue;
+        end
+        
+        R12 = currentReturns(idx12Start:lastDayIdx);
+        R60 = currentReturns(idx60Start:lastDayIdx);
+        
+        
+        try
+            h_opt12 = get_optimal_bandwidth(R12);
+            h_opt60 = get_optimal_bandwidth(R60);
+        catch ME
+            fprintf('Error in R script for month %d, stock %d: %s\n', t, i, ME.message);
+            fullResults12{t, i} = NaN;
+            fullResults60{t, i} = NaN;
+            continue;
+        end
+        
+       
+        f_values12 = arrayfun(@(r) f_hat(r, R12, length(R12), h_opt12), R12);
+        f_values12 = f_values12(:);
+        R12 = R12(:);
+
+        
+        if var(f_values12) > 0 && var(f_values12) < Inf
+            F_hat12 = cumsum(f_values12) * mean(diff(sort(R12)));
+            F_hat12 = F_hat12(:); % Ensure it is a column vector
+            
+            
+            if all(~isnan(f_values12)) && all(~isnan(F_hat12)) && length(f_values12) > 1
+                corrValue12 = -corr(f_values12, F_hat12);
+                if isscalar(corrValue12)  
+                    fullResults12{t, i} = corrValue12;
+                else
+                    fullResults12{t, i} = NaN;
+                end
+            else
+                fullResults12{t, i} = NaN;
+            end
+        else
+            fullResults12{t, i} = NaN;
+        end
+
+        
+        f_values60 = arrayfun(@(r) f_hat(r, R60, length(R60), h_opt60), R60);
+        f_values60 = f_values60(:);
+        R60 = R60(:);
+
+        
+        if var(f_values60) > 0 && var(f_values60) < Inf
+            F_hat60 = cumsum(f_values60) * mean(diff(sort(R60)));
+            F_hat60 = F_hat60(:); % Ensure it is a column vector
+
+            
+            if all(~isnan(f_values60)) && all(~isnan(F_hat60)) && length(f_values60) > 1
+                corrValue60 = -corr(f_values60, F_hat60);
+                if isscalar(corrValue60)  
+                    fullResults60{t, i} = corrValue60;
+                else
+                    fullResults60{t, i} = NaN;
+                end
+            else
+                fullResults60{t, i} = NaN;
+            end
+        else
+            fullResults60{t, i} = NaN;
+        end
+  
+        fprintf('Processed month %d of %d for stock %d of %d\n', t, numMonths, i, numStocks);
+    end
+end
+
+
+writetable(fullResults12, 'results_12_months.csv');
+writetable(fullResults60, 'results_60_months.csv');
+
+
+function h_opt = get_optimal_bandwidth(data)
+    writematrix(data, 'input_data.txt', 'Delimiter', 'tab');
+    
+    
+    cmd = 'Rscript compute_bandwidth.R';
+    [status, cmdout] = system(cmd);
+    
+
+    if status == 0
+        h_opt = readmatrix('output_bandwidth.txt');
+        fprintf('Rscript executed successfully.\n');
+    else
+        error('R script execution failed: %s', cmdout);
+    end
+end
