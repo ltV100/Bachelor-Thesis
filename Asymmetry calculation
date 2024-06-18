@@ -53,7 +53,7 @@ for i = 1:numStocks
         endOfMonthDate = endOfMonthDates(t);
         lastDayIdx = lastTradingDayIdx(t);
 
-        % Ensure lastDayIdx is valid
+        
         if isempty(lastDayIdx) || lastDayIdx == 0
             fprintf('Skipping month %d for stock %d: Invalid lastDayIdx. endOfMonthDate: %s, lastDayIdx: %d\n', t, i, endOfMonthDate, lastDayIdx);
             continue;
@@ -116,7 +116,7 @@ for i = 1:numStocks
         
         if var(f_values12) > 0 && var(f_values12) < Inf
             F_hat12 = cumsum(f_values12) * mean(diff(sort(R12)));
-            F_hat12 = F_hat12(:); % Ensure it is a column vector
+            F_hat12 = F_hat12(:);
             
             
             if all(~isnan(f_values12)) && all(~isnan(F_hat12)) && length(f_values12) > 1
@@ -141,7 +141,7 @@ for i = 1:numStocks
         
         if var(f_values60) > 0 && var(f_values60) < Inf
             F_hat60 = cumsum(f_values60) * mean(diff(sort(R60)));
-            F_hat60 = F_hat60(:); % Ensure it is a column vector
+            F_hat60 = F_hat60(:);
 
             
             if all(~isnan(f_values60)) && all(~isnan(F_hat60)) && length(f_values60) > 1
