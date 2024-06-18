@@ -91,7 +91,7 @@ function transitionMatrix = calculate_transition_matrix(resultsTable, numQuintil
     
     for j = 1:numQuintiles
         if columnSums(j) == 0
-            transitionMatrix(:, j) = NaN; % Assign NaN if the column sum is zero
+            transitionMatrix(:, j) = NaN; 
         else
             transitionMatrix(:, j) = transitionMatrix(:, j) / columnSums(j);
         end
@@ -105,7 +105,7 @@ function transitionMatrix = calculate_transition_matrix(resultsTable, numQuintil
 end
 
 function [q, qEdges, quintiles] = quantile_rank(data, numQuintiles)
-    % Remove NaN values before calculating quantiles
+    
     data = data(~isnan(data));
     
     qEdges = quantile(data, linspace(0, 1, numQuintiles+1));
