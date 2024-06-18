@@ -86,7 +86,6 @@ function [results_eq, results_vw, avgReturnsEq, avgReturnsVw, avgAsymEq, avgAsym
         
         for q = 1:numPortfolios
             if q == numPortfolios
-                % Last portfolio takes the remaining stocks
                 quintileAsym = sortedAsym((q-1)*quintileSize+1:end);
                 quintileReturns = sortedReturns((q-1)*quintileSize+1:end);
             else
@@ -144,11 +143,11 @@ function [t_stats, significance] = newey_west_tstat(returns)
         t_stats(q) = mean_y / sqrt(var_y / n);
         
         if abs(t_stats(q)) > 2.58
-            significance{q} = '***'; % 1% level
+            significance{q} = '***';
         elseif abs(t_stats(q)) > 1.96
-            significance{q} = '**'; % 5% level
+            significance{q} = '**';
         elseif abs(t_stats(q)) > 1.64
-            significance{q} = '*'; % 10% level
+            significance{q} = '*';
         else
             significance{q} = '';
         end
