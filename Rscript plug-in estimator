@@ -1,0 +1,15 @@
+.libPaths("C:/Program Files/R/R-4.4.0/library")
+library(kerdiest)
+
+compute_bandwidth <- function(data, output_file) {
+  data <- as.numeric(unlist(data))
+  data <- data[!is.na(data)]
+  
+  h <- ALbw(type_kernel = "e", vec_data = data)
+  
+  write.table(h, file = output_file, row.names = FALSE, col.names = FALSE)
+}
+
+input_data <- read.table("input_data.txt", header = FALSE)
+
+compute_bandwidth(input_data, "output_bandwidth.txt")
