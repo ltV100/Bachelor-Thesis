@@ -1,0 +1,175 @@
+function trading_algorithm()
+
+    Asym12 = readtable('Final_Asymmetry_Results_12_Months_V2.csv', 'ReadRowNames', true);
+    Asym60 = readtable('Final_Asymmetry_Results_60_Months_V2.csv', 'ReadRowNames', true);
+    Returns = readtable('monthlyReturnsTable.csv', 'ReadRowNames', true);
+
+    Asym12.Date = datetime(Asym12.Properties.RowNames, 'InputFormat', 'yyyy-MM');
+    Asym60.Date = datetime(Asym60.Properties.RowNames, 'InputFormat', 'yyyy-MM');
+
+    try
+        Returns.Date = datetime(Returns.Properties.RowNames, 'InputFormat', 'yyyy-MM-dd');
+    catch
+        try
+            Returns.Date = datetime(Returns.Properties.RowNames, 'InputFormat', 'yyyy-MM');
+        catch
+            error('Unable to parse the date format in Returns');
+        end
+    end
+
+    [results12_eq, results12_vw, avgReturnsEq12, avgReturnsVw12, avgAsymEq12, avgAsymVw12] = process_data(Asym12, Returns);
+    [results60_eq, results60_vw, avgReturnsEq60, avgReturnsVw60, avgAsymEq60, avgAsymVw60] = process_data(Asym60, Returns);
+
+    disp('Results for 12-month dataset:');
+    disp(results12_eq);
+    disp(results12_vw);
+    disp('Results for 60-month dataset:');
+    disp(results60_eq);
+    disp(results60_vw);
+    
+    writetable(results12_eq, 'results12_eq.csv');
+    writetable(results12_vw, 'results12_vw.csv');
+    writetable(results60_eq, 'results60_eq.csv');
+    writetable(results60_vw, 'results60_vw.csv');
+    
+    writematrix(avgReturnsEq12, 'avgReturnsEq12.csv');
+    writematrix(avgReturnsVw12, 'avgReturnsVw12.csv');
+    writematrix(avgAsymEq12, 'avgAsymEq12.csv');
+    writematrix(avgAsymVw12, 'avgAsymVw12.csv');
+    writematrix(avgReturnsEq60, 'avgReturnsEq60.csv');
+    writematrix(avgReturnsVw60, 'avgReturnsVw60.csv');
+    writematrix(avgAsymEq60, 'avgAsymEq60.csv');
+    writematrix(avgAsymVw60, 'avgAsymVw60.csv');
+    
+end
+
+function [results_eq, results_vw, avgReturnsEq, avgReturnsVw, avgAsymEq, avgAsymVw] = process_data(Asym, Returns)
+    
+    commonStocks = intersect(Asym.Properties.VariableNames(1:end-1), Returns.Properties.VariableNames(2:end));
+    
+    Asym = Asym(:, [{'Date'}, commonStocks]);
+    Returns = Returns(:, [{'Date'}, commonStocks]);
+
+    months = Asym.Date;
+    numMonths = length(months);
+    numPortfolios = 5;
+    
+    avgReturnsEq = zeros(numMonths, numPortfolios);
+    avgReturnsVw = zeros(numMonths, numPortfolios);
+    avgAsymEq = zeros(numMonths, numPortfolios);
+    avgAsymVw = zeros(numMonths, numPortfolios);
+    
+    for i = 1:numMonths
+        currentMonth = months(i);
+        nextMonth = dateshift(currentMonth, 'start', 'month', 1);
+
+        returnsIdx = find(Returns.Date == nextMonth);
+        if isempty(returnsIdx)
+            continue;
+        end
+        
+        asymValues = table2array(Asym(i, 2:end)); 
+        returnsValues = table2array(Returns(returnsIdx, 2:end)); 
+
+        validIdx = ~isnan(asymValues) & ~isnan(returnsValues);
+        asymValues = asymValues(validIdx);
+        returnsValues = returnsValues(validIdx);
+        
+        if length(asymValues) < numPortfolios
+            continue;
+        end
+        
+        [sortedAsym, sortIdx] = sort(asymValues, 'ascend');
+        sortedReturns = returnsValues(sortIdx);
+        
+        quintileSize = floor(length(sortedAsym) / numPortfolios);
+        
+        for q = 1:numPortfolios
+            if q == numPortfolios
+                % Last portfolio takes the remaining stocks
+                quintileAsym = sortedAsym((q-1)*quintileSize+1:end);
+                quintileReturns = sortedReturns((q-1)*quintileSize+1:end);
+            else
+                quintileAsym = sortedAsym((q-1)*quintileSize+1:q*quintileSize);
+                quintileReturns = sortedReturns((q-1)*quintileSize+1:q*quintileSize);
+            end
+            
+            avgReturnsEq(i, q) = mean(quintileReturns);
+            avgAsymEq(i, q) = mean(quintileAsym);
+            
+            totalValue = sum(quintileAsym);
+            avgReturnsVw(i, q) = sum(quintileReturns .* (quintileAsym / totalValue));
+            avgAsymVw(i, q) = sum(quintileAsym .* (quintileAsym / totalValue));
+        end
+    end
+
+    disp('Intermediate avgReturnsEq:');
+    disp(avgReturnsEq);
+    disp('Intermediate avgReturnsVw:');
+    disp(avgReturnsVw);
+    
+    avgReturnEq = mean(avgReturnsEq, 'omitnan');
+    avgReturnVw = mean(avgReturnsVw, 'omitnan');
+    avgAsymEq = mean(avgAsymEq, 'omitnan');
+    avgAsymVw = mean(avgAsymVw, 'omitnan');
+    
+    disp('avgReturnEq:');
+    disp(avgReturnEq);
+    disp('avgReturnVw:');
+    disp(avgReturnVw);
+
+    [t_stat_eq, sig_eq] = newey_west_tstat(avgReturnsEq);
+    [t_stat_vw, sig_vw] = newey_west_tstat(avgReturnsVw);
+    
+    results_eq = table(avgReturnEq', avgAsymEq', t_stat_eq', sig_eq', 'VariableNames', {'AvgReturn', 'AvgAsym', 't_stat', 'Significance'}, 'RowNames', {'Q1', 'Q2', 'Q3', 'Q4', 'Q5'});
+    results_vw = table(avgReturnVw', avgAsymVw', t_stat_vw', sig_vw', 'VariableNames', {'AvgReturn', 'AvgAsym', 't_stat', 'Significance'}, 'RowNames', {'Q1', 'Q2', 'Q3', 'Q4', 'Q5'});
+    
+end
+
+function [t_stats, significance] = newey_west_tstat(returns)
+    numQuintiles = size(returns, 2);
+    t_stats = zeros(1, numQuintiles);
+    significance = cell(1, numQuintiles);
+    for q = 1:numQuintiles
+        y = returns(:, q);
+        y = y(~isnan(y));
+        n = length(y);
+        if n < 2
+            t_stats(q) = NaN;
+            significance{q} = '';
+            continue;
+        end
+        mean_y = mean(y);
+        var_y = newey_west_variance(y);
+        t_stats(q) = mean_y / sqrt(var_y / n);
+        
+        if abs(t_stats(q)) > 2.58
+            significance{q} = '***'; % 1% level
+        elseif abs(t_stats(q)) > 1.96
+            significance{q} = '**'; % 5% level
+        elseif abs(t_stats(q)) > 1.64
+            significance{q} = '*'; % 10% level
+        else
+            significance{q} = '';
+        end
+    end
+end
+
+function var_y = newey_west_variance(y)
+    n = length(y);
+    k_max = floor(4 * (n / 100)^(2/9));
+    gamma_0 = var(y, 1);
+    gamma_k = zeros(1, k_max);
+    for k = 1:k_max
+        y1 = y(1:end-k);
+        y2 = y(k+1:end);
+        if length(y1) == length(y2)
+            cov_matrix = cov(y1, y2, 1);
+            gamma_k(k) = cov_matrix(1, 2);
+        else
+            gamma_k(k) = 0;
+        end
+    end
+    weights = 1 - (1:k_max) / (k_max + 1);
+    var_y = gamma_0 + 2 * sum(weights .* gamma_k);
+end
